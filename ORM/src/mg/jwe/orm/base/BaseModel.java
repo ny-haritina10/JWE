@@ -273,4 +273,39 @@ public abstract class BaseModel {
 
         return null;
     }
+
+    /**
+     * Retrieves the last inserted record based on auto-incrementing ID
+     * Note: This assumes the ID is auto-incrementing and the highest ID is the last inserted
+     * 
+     * @param <T> The entity type
+     * @param clazz The class of the entity
+     * @return The last inserted instance or null if table is empty
+     * @throws SQLException if a database error occurs
+     */
+    public static <T extends BaseModel> T getLastInserted(Connection connection, Class<T> clazz) 
+        throws SQLException 
+    {
+        Table tableAnnotation = clazz.getAnnotation(Table.class);
+        if (tableAnnotation == null) {
+            throw new RuntimeException("No Table annotation found for class " + clazz.getName());
+        }
+        
+        String tableName = tableAnnotation.name();
+        String idColumn = UtilFK.getIdColumnName(clazz);
+        
+        String sql = "SELECT * FROM " + tableName + " ORDER BY " + idColumn + " DESC LIMIT 1";
+        
+        try (PreparedStatement stmt = connection.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+            
+            if (rs.next()) {
+                T instance = UtilMapper.mapResultSetToObject(rs, clazz);
+                UtilFK.loadForeignKeys(connection, instance);
+                return instance;
+            }
+        }
+        
+        return null;
+    }
 }
