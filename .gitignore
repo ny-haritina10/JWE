@@ -1,0 +1,11 @@
+# all .class file
+*.class
+
+# remove conf file
+D:/Studies/Personal Studie/_JAVA/JWE/ORM/_config.conf
+
+# bin
+bin/
+
+# test
+test/
