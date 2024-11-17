@@ -21,6 +21,7 @@ import mg.jwe.orm.mapper.UtilMapper;
 import mg.jwe.orm.query.UtilQuery;
 import mg.jwe.orm.type.UtilType;
 
+@SuppressWarnings("unchecked")
 public abstract class BaseModel {
 
     public BaseModel()
@@ -206,10 +207,10 @@ public abstract class BaseModel {
      * Retrieves all records for a given entity type
      * @param <T> The entity type
      * @param clazz The class of the entity
-     * @return List of all entities
+     * @return An array of all entities
      * @throws SQLException if a database error occurs
      */
-    public static <T extends BaseModel> List<T> getAll(Connection connection, Class<T> clazz) 
+    public static <T extends BaseModel> T[] getAll(Connection connection, Class<T> clazz) 
         throws SQLException 
     {
         Table tableAnnotation = clazz.getAnnotation(Table.class);
@@ -231,7 +232,8 @@ public abstract class BaseModel {
             }
         }
         
-        return results;
+        T[] array = (T[]) java.lang.reflect.Array.newInstance(clazz, results.size());
+        return results.toArray(array);
     }
 
     /**
