@@ -8,18 +8,16 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.StringJoiner;
-import java.util.UUID;
+
 
 import mg.jwe.orm.annotations.Column;
 import mg.jwe.orm.annotations.ForeignKey;
 import mg.jwe.orm.annotations.Id;
 import mg.jwe.orm.annotations.Table;
-
+import mg.jwe.orm.criteria.Criterion;
 import mg.jwe.orm.foreignkey.UtilFK;
 import mg.jwe.orm.mapper.UtilMapper;
 import mg.jwe.orm.query.UtilQuery;
-import mg.jwe.orm.type.UtilType;
 
 @SuppressWarnings("unchecked")
 public abstract class BaseModel {
@@ -94,6 +92,7 @@ public abstract class BaseModel {
             for (int i = 0; i < values.size(); i++) 
             { stmt.setObject(i + 1, values.get(i)); }
 
+            System.out.println("SQL from save: " + sql);
             stmt.executeUpdate();
             
             // Handle generated keys
@@ -110,7 +109,8 @@ public abstract class BaseModel {
      * This method constructs an UPDATE SQL statement based on the annotations present on
      * the class fields. It identifies which fields to update and uses the {@link Table}
      * annotation to determine the table name. The method also identifies the ID column
-     * to specify which record should be updated.
+     * to specify which record should be updated, and handles foreign key relationships
+     * by retrieving the ID of referenced objects.
      * </p>
      *
      * @param connection The database connection to use for executing the update operation.
@@ -120,7 +120,7 @@ public abstract class BaseModel {
         Class<?> clazz = this.getClass();
         Table tableAnnotation = clazz.getAnnotation(Table.class);
         String tableName = tableAnnotation.name();
-        
+
         List<String> columns = new ArrayList<>();
         List<Object> values = new ArrayList<>();
 
@@ -130,23 +130,28 @@ public abstract class BaseModel {
         for (Field field : clazz.getDeclaredFields()) {
             field.setAccessible(true);
             Column columnAnnotation = field.getAnnotation(Column.class);
+            ForeignKey fkAnnotation = field.getAnnotation(ForeignKey.class);
 
-            if (columnAnnotation != null) {
-                try {
-                    Object value = field.get(this);
+            try {
+                Object value = field.get(this);
+                if (columnAnnotation != null) {
                     if (field.isAnnotationPresent(Id.class)) {
                         idColumn = columnAnnotation.name();
                         idValue = value;
-                    } 
-                    
-                    else if (value != null) {
+                    } else if (value != null) {
                         columns.add(columnAnnotation.name());
                         values.add(value);
                     }
-                } 
-                
-                catch (IllegalAccessException e) 
-                { throw new RuntimeException("Failed to access field", e); }
+                } else if (fkAnnotation != null && value instanceof BaseModel) {
+                    // Handle foreign key
+                    Object foreignId = new UtilFK().getForeignKeyId((BaseModel) value);
+                    if (foreignId != null) {
+                        columns.add("id_" + field.getName());
+                        values.add(foreignId);
+                    }
+                }
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException("Failed to access field", e);
             }
         }
 
@@ -154,13 +159,16 @@ public abstract class BaseModel {
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
             int paramIndex = 1;
-            for (Object value : values) 
-            { stmt.setObject(paramIndex++, value); }
-
+            for (Object value : values) {
+                stmt.setObject(paramIndex++, value);
+            }
             stmt.setObject(paramIndex, idValue);
             stmt.executeUpdate();
         }
+
+        System.out.println("Update query: " + sql);
     }
+
 
     /**
      * Deletes the current instance of the class from the database.
@@ -309,5 +317,127 @@ public abstract class BaseModel {
         }
         
         return null;
+    }
+
+    /**
+     * Finds records matching all specified criteria (AND condition)
+     * Example usage:
+     * Product.findByCriteria(connection, Product.class,
+     *     new Criterion("name", "=", "iPhone"),
+     *     new Criterion("price", ">=", 1200)
+     * );
+     *
+     * @param connection Database connection
+     * @param clazz The entity class
+     * @param criteria Variable number of criteria to match
+     * @return Array of matching entities
+     * @throws SQLException If a database error occurs
+     */
+    public static <T extends BaseModel> T[] findByCriteria(Connection connection, Class<T> clazz, Criterion... criteria) 
+        throws SQLException 
+    {
+        Table tableAnnotation = clazz.getAnnotation(Table.class);
+        if (tableAnnotation == null) {
+            throw new RuntimeException("No Table annotation found for class " + clazz.getName());
+        }
+        
+        String tableName = tableAnnotation.name();
+        List<T> results = new ArrayList<>();
+        
+        StringBuilder sql = new StringBuilder("SELECT * FROM " + tableName);
+        
+        if (criteria.length > 0) {
+            sql.append(" WHERE ");
+            for (int i = 0; i < criteria.length; i++) {
+                if (i > 0) {
+                    sql.append(" AND ");
+                }
+                sql.append(criteria[i].getColumn())
+                   .append(" ")
+                   .append(criteria[i].getOperator())
+                   .append(" ?");
+            }
+        }
+        
+        sql.append(" ORDER BY id");
+        
+        try (PreparedStatement stmt = connection.prepareStatement(sql.toString())) {
+            // Set parameters
+            for (int i = 0; i < criteria.length; i++) {
+                stmt.setObject(i + 1, criteria[i].getValue());
+            }
+            
+            ResultSet rs = stmt.executeQuery();
+            
+            while (rs.next()) {
+                T instance = UtilMapper.mapResultSetToObject(rs, clazz);
+                UtilFK.loadForeignKeys(connection, instance);
+                results.add(instance);
+            }
+        }
+        
+        T[] array = (T[]) java.lang.reflect.Array.newInstance(clazz, results.size());
+        return results.toArray(array);
+    }
+
+    /**
+     * Finds records matching any of the specified criteria (OR condition).
+     * Example usage:
+     * Product.findByAnyCriteria(connection, Product.class,
+     *     new Criterion("name", "LIKE", "%iPhone%"),
+     *     new Criterion("price", "<", 1000)
+     * );
+     *
+     * @param connection Database connection
+     * @param clazz The entity class
+     * @param criteria Variable number of criteria to match
+     * @return Array of matching entities
+     * @throws SQLException If a database error occurs
+     */
+    public static <T extends BaseModel> T[] findByAnyCriteria(Connection connection, Class<T> clazz, Criterion... criteria) 
+        throws SQLException 
+    {
+        Table tableAnnotation = clazz.getAnnotation(Table.class);
+        if (tableAnnotation == null) {
+            throw new RuntimeException("No Table annotation found for class " + clazz.getName());
+        }
+        
+        String tableName = tableAnnotation.name();
+        List<T> results = new ArrayList<>();
+        
+        StringBuilder sql = new StringBuilder("SELECT * FROM " + tableName);
+        
+        if (criteria.length > 0) {
+            sql.append(" WHERE ");
+            for (int i = 0; i < criteria.length; i++) {
+                if (i > 0) {
+                    sql.append(" OR ");
+                }
+                sql.append(criteria[i].getColumn())
+                   .append(" ")
+                   .append(criteria[i].getOperator())
+                   .append(" ?");
+            }
+        }
+        
+        sql.append(" ORDER BY id");
+        
+        try (PreparedStatement stmt = connection.prepareStatement(sql.toString())) {
+            // Set parameters
+            for (int i = 0; i < criteria.length; i++) {
+                stmt.setObject(i + 1, criteria[i].getValue());
+            }
+            
+            ResultSet rs = stmt.executeQuery();
+            
+            while (rs.next()) {
+                T instance = UtilMapper.mapResultSetToObject(rs, clazz);
+                UtilFK.loadForeignKeys(connection, instance);
+                results.add(instance);
+            }
+        }
+        
+        T[] array = (T[]) java.lang.reflect.Array.newInstance(clazz, results.size());
+        return results.toArray(array);
     }
 }

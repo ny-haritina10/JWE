@@ -211,6 +211,5 @@ public class UtilFK {
         }
 
         throw new RuntimeException("Field is not a foreign key: " + field.getName());
-    }
-    
+    }   
 }
