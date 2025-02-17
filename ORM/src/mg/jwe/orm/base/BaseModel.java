@@ -76,7 +76,7 @@ public abstract class BaseModel {
 
                         if (foreignId != null) {
                             // Convention: foreign key column begins with id_
-                            columns.add("id_" + field.getName()); 
+                            columns.add(UtilFK.camelToSnake("id_" + field.getName())); 
                             values.add(foreignId);
                         }
                     }

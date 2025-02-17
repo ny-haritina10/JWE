@@ -61,7 +61,7 @@ public class UtilFK {
         throws SQLException 
     {
         try {
-            String fkColumnName = "id_" + field.getName();
+            String fkColumnName = camelToSnake("id_" + field.getName());
             Object fkValue = UtilFK.getForeignKeyValue(connection, instance, fkColumnName);
             
             if (fkValue != null) {
@@ -206,10 +206,38 @@ public class UtilFK {
             if (!fkAnnotation.column().isEmpty()) 
             { return fkAnnotation.column(); }
 
-            // otherwise, use the convention: fieldName_id
-            return "id_" + field.getName();
+            // otherwise, use the convention: id_field_name
+            System.out.println("debug log: " + camelToSnake("id_" + field.getName()));
+            return camelToSnake("id_" + field.getName());
         }
 
         throw new RuntimeException("Field is not a foreign key: " + field.getName());
     }   
+
+    /**
+     * Converts a string from camelCase to snake_case. This method iterates through each character in the input string.
+     * If a character is uppercase, it appends an underscore before it (unless it's the first character) and converts it to lowercase.
+     *
+     * @param input The camelCase string to be converted.
+     * @return The input string converted into snake_case format.
+     */
+    public static String camelToSnake(String input) {
+        StringBuilder result = new StringBuilder();
+        
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            
+            if (Character.isUpperCase(c)) {
+                if (i > 0) 
+                { result.append('_'); }
+
+                result.append(Character.toLowerCase(c));
+            }
+
+            else 
+            { result.append(c); }
+        }
+        
+        return result.toString();
+    }
 }
